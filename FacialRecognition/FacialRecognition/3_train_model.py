@@ -1,6 +1,7 @@
 """
-Complete CNN Training with Image Format Fix
-Automatically converts problematic images to 8-bit RGB
+Module 3: Train Face Recognition Model (INCREMENTAL + FAST)
+Only trains NEW persons, keeps existing encodings
+Uses HOG detection for 10x faster training
 """
 
 import os
@@ -8,180 +9,178 @@ import cv2
 import numpy as np
 import face_recognition
 import pickle
+from pathlib import Path
 from PIL import Image, ImageOps
-from sklearn.preprocessing import LabelEncoder
+from datetime import datetime
 
 
-def fix_and_load_image(path):
+def load_as_rgb_uint8(img_path):
     """
-    Load image and ensure it's proper 8-bit RGB for face_recognition
+    Load image as proper 8-bit RGB array
     """
     try:
-        # Open with PIL
-        with Image.open(path) as im:
+        with Image.open(img_path) as im:
             im.load()
             im = ImageOps.exif_transpose(im)
             im = im.convert("RGB")
-            
-            # Convert to numpy uint8 array
             arr = np.array(im, dtype=np.uint8)
-            
-            # Ensure contiguous memory
             if not arr.flags['C_CONTIGUOUS']:
                 arr = np.ascontiguousarray(arr)
-            
-            # Verify shape
-            if len(arr.shape) != 3 or arr.shape[2] != 3:
-                raise ValueError(f"Invalid shape: {arr.shape}")
-            
             return arr
-    
     except Exception as e:
-        print(f"    Error loading: {e}")
         return None
 
 
-def train_model_cnn():
-    """Train CNN-based face recognition model"""
+def train_model_incremental():
+    """
+    Train only NEW persons/images, keep existing encodings
+    OPTIMIZED: Uses HOG for speed
+    """
     
-    dataset = "dataset"
-    
-    if not os.path.exists(dataset):
-        print("❌ Error: 'dataset' folder not found!")
-        return False
-    
-    print("\n" + "="*60)
-    print("CNN FACE RECOGNITION - TRAINING")
-    print("="*60)
-    print(f"Dataset: {dataset}/")
-    print("Method: CNN (Deep Learning)")
-    print("Image handling: Auto-fix to 8-bit RGB")
-    print("="*60 + "\n")
-    
-    encodings = []
-    names = []
-    total = 0
-    success = 0
-    failed = 0
-    
-    # Process each person folder
-    for person in os.listdir(dataset):
-        person_dir = os.path.join(dataset, person)
-        
-        if not os.path.isdir(person_dir):
-            continue
-        
-        print(f"Training: {person}")
-        
-        # Get all image files
-        files = [f for f in os.listdir(person_dir)
-                if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff'))]
-        
-        if not files:
-            print(f"  ⚠ No images found\n")
-            continue
-        
-        # Process each image
-        for img_file in files:
-            total += 1
-            img_path = os.path.join(person_dir, img_file)
-            
-            try:
-                # Load and fix image
-                img_rgb = fix_and_load_image(img_path)
-                
-                if img_rgb is None:
-                    print(f"  ✗ Cannot load: {img_file}")
-                    failed += 1
-                    continue
-                
-                # Detect faces with CNN
-                locations = face_recognition.face_locations(img_rgb, model='cnn')
-                
-                if len(locations) == 0:
-                    print(f"  ✗ No face: {img_file}")
-                    failed += 1
-                    continue
-                
-                # Generate face encodings
-                encs = face_recognition.face_encodings(img_rgb, known_face_locations=locations)
-                
-                if len(encs) == 0:
-                    print(f"  ✗ No encoding: {img_file}")
-                    failed += 1
-                    continue
-                
-                # Take first encoding
-                encodings.append(encs[0])
-                names.append(person)
-                success += 1
-                print(f"  ✓ {img_file}")
-                
-            except Exception as e:
-                print(f"  ✗ Error in {img_file}: {e}")
-                failed += 1
-        
-        print(f"  Total: {len(files)}\n")
-    
-    # Check if we got any encodings
-    if len(encodings) == 0:
-        print("❌ No encodings generated!")
-        return False
-    
-    # Convert to numpy array
-    encodings = np.array(encodings)
-    
-    # Create label encoder
-    label_encoder = LabelEncoder()
-    label_encoder.fit(names)
-    
-    # Create model dictionary
-    model = {
-        'encodings': encodings,
-        'names': names,
-        'label_encoder': label_encoder,
-        'detection_method': 'cnn'
-    }
-    
-    # Save model
-    os.makedirs('models', exist_ok=True)
+    dataset_path = 'dataset'
     model_path = 'models/face_encodings.pkl'
     
-    with open(model_path, 'wb') as f:
-        pickle.dump(model, f)
+    if not os.path.exists(dataset_path):
+        print("❌ Error: 'dataset' folder not found!")
+        return
     
+    os.makedirs('models', exist_ok=True)
+    
+    print("\n" + "="*60)
+    print("INCREMENTAL FACE RECOGNITION TRAINING")
     print("="*60)
-    print("✓ TRAINING COMPLETED SUCCESSFULLY")
-    print("="*60)
-    print(f"Total images: {total}")
-    print(f"Success: {success}")
-    print(f"Failed: {failed}")
-    print(f"Unique persons: {len(set(names))}")
-    print(f"Model saved: {model_path}")
-    print(f"Total encodings: {len(encodings)}")
+    print(f"Dataset: {dataset_path}/")
+    print(f"Method: HOG (Fast Detection)")
+    print("Mode: INCREMENTAL (only new data)")
     print("="*60 + "\n")
     
-    # Show statistics per person
-    print("PERSON STATISTICS:")
-    print("-" * 60)
-    for name in set(names):
-        count = names.count(name)
-        print(f"  {name}: {count} face encodings")
-    print("="*60 + "\n")
+    # Load existing model if it exists
+    existing_encodings = []
+    existing_names = []
+    trained_persons = set()
     
-    return True
+    if os.path.exists(model_path):
+        print("📦 Loading existing model...")
+        with open(model_path, 'rb') as f:
+            model_data = pickle.load(f)
+            existing_encodings = model_data['encodings']
+            existing_names = model_data['names']
+            trained_persons = set(existing_names)
+        print(f"✓ Found {len(existing_encodings)} existing encodings")
+        print(f"✓ Already trained persons: {', '.join(sorted(trained_persons))}\n")
+    else:
+        print("📦 No existing model found. Training from scratch.\n")
+    
+    person_folders = [f for f in os.listdir(dataset_path) 
+                     if os.path.isdir(os.path.join(dataset_path, f))]
+    
+    if not person_folders:
+        print("❌ No person folders found in dataset!")
+        return
+    
+    new_persons = [p for p in person_folders if p not in trained_persons]
+    
+    if not new_persons:
+        print("✓ All persons already trained. No new data to process.")
+        print(f"\nCurrent persons: {', '.join(sorted(trained_persons))}")
+        return
+    
+    print(f"🆕 New persons to train: {', '.join(new_persons)}\n")
+    
+    all_encodings = list(existing_encodings)
+    all_names = list(existing_names)
+    
+    total_processed = 0
+    total_success = 0
+    total_failed = 0
+    
+    for person_name in new_persons:
+        person_folder = os.path.join(dataset_path, person_name)
+        
+        print(f"Training: {person_name}")
+        
+        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+        image_files = [f for f in os.listdir(person_folder) 
+                      if os.path.splitext(f.lower())[1] in image_extensions]
+        
+        if not image_files:
+            print(f"  ⚠️  No images found\n")
+            continue
+        
+        person_success = 0
+        
+        for i, img_file in enumerate(image_files, 1):
+            img_path = os.path.join(person_folder, img_file)
+            total_processed += 1
+            
+            # Progress indicator
+            print(f"  Processing {i}/{len(image_files)}...", end='\r')
+            
+            img_rgb = load_as_rgb_uint8(img_path)
+            if img_rgb is None:
+                total_failed += 1
+                continue
+            
+            try:
+                # ⚡ USE HOG FOR SPEED (10x faster than CNN)
+                locations = face_recognition.face_locations(img_rgb, model='hog')
+                
+                if not locations:
+                    total_failed += 1
+                    continue
+                
+                encodings = face_recognition.face_encodings(img_rgb, known_face_locations=locations)
+                
+                if not encodings:
+                    total_failed += 1
+                    continue
+                
+                all_encodings.append(encodings[0])
+                all_names.append(person_name)
+                person_success += 1
+                total_success += 1
+                
+            except Exception as e:
+                total_failed += 1
+        
+        print(f"  ✓ Success: {person_success}/{len(image_files)}")
+        print(f"  Total: {len(image_files)}\n")
+    
+    if total_success > 0:
+        model_data = {
+            'encodings': all_encodings,
+            'names': all_names,
+            'detection_method': 'hog',  # ⚡ Changed to HOG
+            'trained_date': datetime.now().isoformat()
+        }
+        
+        with open(model_path, 'wb') as f:
+            pickle.dump(model_data, f)
+        
+        print("="*60)
+        print("✓ TRAINING COMPLETED")
+        print("="*60)
+        print(f"Total images processed: {total_processed}")
+        print(f"Successfully encoded: {total_success}")
+        print(f"Failed: {total_failed}")
+        print(f"Model saved: {model_path}")
+        print("="*60)
+        
+        print("\nPERSON STATISTICS:")
+        unique_persons = sorted(set(all_names))
+        for person in unique_persons:
+            count = all_names.count(person)
+            status = "🆕 NEW" if person in new_persons else "✓ existing"
+            print(f"  {person}: {count} encodings ({status})")
+        
+        print("\n✓ Ready for recognition!")
+        print("Next: Run 4_detect_faces.py")
+        print("="*60 + "\n")
+        
+    else:
+        print("❌ No encodings generated!")
+        print("✗ Training failed. Please check errors above.")
 
 
 if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("FACIAL RECOGNITION - CNN TRAINING")
-    print("="*60)
-    print("\nStarting training from dataset/ folder...")
-    
-    success = train_model_cnn()
-    
-    if success:
-        print("\n✓ Training complete! You can now run detection.")
-        print("Next step: Run 4_detect_faces.py to test recognition")
-    else:
-        print("\n✗ Training failed. Please check errors above.")
+    train_model_incremental()

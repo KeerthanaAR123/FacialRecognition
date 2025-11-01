@@ -81,7 +81,7 @@ def capture_training_photos(person_name, num_images=50):
             image_path = os.path.join(person_dir, f'{person_name}_{count+1}.jpg')
             cv2.imwrite(image_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
             count += 1
-            print(f"✓ Image {count}/{num_images} saved: {image_path}")
+            print(f" Image {count}/{num_images} saved: {image_path}")
             time.sleep(0.2)  # Small delay to avoid duplicate captures
         
         # Quit on 'Q' key

@@ -3,6 +3,7 @@ Module 4: Real-Time Face Detection and Recognition
 Implements live webcam-based face detection and recognition
 Uses trained CNN-based face encodings for identification
 Saves screenshots in JPG format
+UPDATED: Stricter threshold to prevent false matches
 """
 
 import cv2
@@ -23,7 +24,7 @@ def detect_faces_realtime():
     model_path = 'models/face_encodings.pkl'
     
     if not os.path.exists(model_path):
-        print("❌ Error: Trained model not found! Please run training first.")
+        print("Error: Trained model not found! Please run training first.")
         print("Run: python 3_train_model.py")
         return
     
@@ -39,15 +40,24 @@ def detect_faces_realtime():
     known_face_names = model_data['names']
     detection_method = model_data.get('detection_method', 'hog')
     
-    print(f"✓ Model loaded successfully")
+    print(f" Model loaded successfully")
     print(f"Total face encodings: {len(known_face_encodings)}")
     print(f"Unique persons: {len(set(known_face_names))}")
     print(f"Detection method: {detection_method.upper()}")
+    
+    # Display trained persons
+    print(f"\nTrained persons:")
+    for name in set(known_face_names):
+        count = known_face_names.count(name)
+        print(f"  - {name}: {count} encodings")
+    
     print("="*60 + "\n")
     
     print("Starting webcam...")
     print("Press 'Q' to quit")
-    print("Press 'S' to save screenshot (JPG format)\n")
+    print("Press 'S' to save screenshot (JPG format)")
+    print("\n  Recognition Threshold: STRICT (0.45)")
+    print("   Lower threshold = More accurate, fewer false positives\n")
     
     # Initialize webcam
     video_capture = cv2.VideoCapture(0)
@@ -68,7 +78,7 @@ def detect_faces_realtime():
         ret, frame = video_capture.read()
         
         if not ret:
-            print("❌ Error: Cannot access webcam")
+            print(" Error: Cannot access webcam")
             break
         
         frame_count += 1
@@ -99,9 +109,12 @@ def detect_faces_realtime():
                 best_match_index = np.argmin(distances)
                 min_distance = distances[best_match_index]
                 
-                # Threshold for face recognition (lower = more strict)
-                # Typical threshold: 0.6 (lower values = higher confidence required)
-                if min_distance < 0.6:
+                # ⭐ STRICTER THRESHOLD FOR ACCURACY ⭐
+                # Changed from 0.6 to 0.45 for better accuracy
+                # Lower value = more strict = fewer false positives
+                RECOGNITION_THRESHOLD = 0.45  # ← MAIN CHANGE HERE
+                
+                if min_distance < RECOGNITION_THRESHOLD:
                     name = known_face_names[best_match_index]
                     confidence = (1 - min_distance) * 100  # Convert to percentage
                 else:
@@ -147,6 +160,10 @@ def detect_faces_realtime():
         # Display FPS and frame count
         cv2.putText(frame, f"Frame: {frame_count}", (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # Display threshold info
+        cv2.putText(frame, "Threshold: STRICT (0.45)", (10, 60),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         
         # Display instructions
         cv2.putText(frame, "Press 'Q' to quit | 'S' to save screenshot", (10, 460),
